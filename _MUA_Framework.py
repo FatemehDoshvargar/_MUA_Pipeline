@@ -1,5 +1,5 @@
 """
-Unified Framework for Connectivity-based Predictive Modeling
+Mass univariate aggregation methods for machine learning in neuroscience
 Author: Fatemeh Doshvargar
 """
 import numpy as np
@@ -822,19 +822,9 @@ class MUA(BaseEstimator, RegressorMixin):
         return r2_score(y, y_pred)
 
 # Plot the results
-
 def plot_results(predictions, actual, title=None):
     """
     Plot prediction results with scatter plot and error distribution.
-
-    Parameters
-    ----------
-    predictions : array-like
-        Predicted values
-    actual : array-like
-        Actual values
-    title : str, optional
-        Plot title
     """
     if predictions is None:
         return
@@ -850,22 +840,38 @@ def plot_results(predictions, actual, title=None):
     ax1.scatter(actual, predictions, alpha=0.7, s=30, edgecolors='k',
                 linewidth=0.5, color='#4472C4', zorder=3)
 
-    min_val = min(actual.min(), predictions.min())
-    max_val = max(actual.max(), predictions.max())
-    ax1.plot([min_val, max_val], [min_val, max_val], 'k--', lw=1.5, alpha=0.6, zorder=2)
+    min_val_x = actual.min()
+    max_val_x = actual.max()
 
+    # Calculate correlation and statistics
     r_val, p_val = pearsonr(actual, predictions)
-    r2 = r2_score(actual, predictions)
+
+    # Calculate regression line from correlation coefficient
+    mean_actual = np.mean(actual)
+    mean_pred = np.mean(predictions)
+    std_actual = np.std(actual)
+    std_pred = np.std(predictions)
+
+    # Regression line slope and intercept from correlation
+    slope = r_val * (std_pred / std_actual)
+    intercept = mean_pred - slope * mean_actual
+
+    # Plot the regression line across the actual data range
+    x_line = np.array([min_val_x, max_val_x])
+    y_line = slope * x_line + intercept
+    ax1.plot(x_line, y_line, 'r-', lw=2, alpha=0.8, zorder=2)
 
     ax1.set_xlabel('Actual Values', fontsize=11, fontweight='normal')
     ax1.set_ylabel('Predicted Values', fontsize=11, fontweight='normal')
 
+    # Format p-value for display
     if p_val < 0.001:
         p_text = "p < 0.001"
     else:
         p_text = f"p = {p_val:.3f}"
 
-    ax1.text(0.05, 0.95, f'r = {r_val:.3f}\n{p_text}\nR² = {r2:.3f}',
+    # Add text (removed R²)
+    ax1.text(0.05, 0.95, f'r = {r_val:.3f}\n{p_text}',
              transform=ax1.transAxes, fontsize=9, verticalalignment='top',
              bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
 
@@ -895,14 +901,17 @@ def plot_results(predictions, actual, title=None):
              horizontalalignment='right',
              bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
 
+    # Grid for y-axis only
     ax2.grid(True, alpha=0.3, linewidth=0.5, axis='y')
     ax2.set_axisbelow(True)
 
+    # Remove top and right spines for cleaner look
     for ax in [ax1, ax2]:
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         ax.tick_params(direction='out', length=4, width=0.8)
 
+    # Add panel labels
     ax1.text(-0.1, 1.05, 'A', transform=ax1.transAxes, fontsize=12, fontweight='bold')
     ax2.text(-0.1, 1.05, 'B', transform=ax2.transAxes, fontsize=12, fontweight='bold')
 
@@ -912,7 +921,6 @@ def plot_results(predictions, actual, title=None):
         fig.suptitle(title, y=1.02)
 
     plt.show()
-
 
 if __name__ == "__main__":
     # Load data
@@ -956,3 +964,5 @@ if __name__ == "__main__":
     print(f"R²: {r2:.3f}")
     print(f"MAE: {mae:.3f}")
     print(f"RMSE: {rmse:.3f}")
+
+    plot_results(cpm_predictions, behavioral_clean, title=None)
