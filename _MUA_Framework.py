@@ -5,7 +5,7 @@ Author: Fatemeh Doshvargar
 import numpy as np
 import pandas as pd
 from scipy.stats import pearsonr, spearmanr, rankdata
-from sklearn.base import BaseEstimator, RegressorMixin, TransformerMixin
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import KFold, cross_val_predict, cross_val_score
 from sklearn.linear_model import LinearRegression, Ridge, Lasso
@@ -386,9 +386,8 @@ class FeatureVectorizer(BaseEstimator, TransformerMixin):
             return X
 
 
-# Mass Univariate Aggregation
+class MUA(BaseEstimator, TransformerMixin):
 
-class MUA(BaseEstimator, RegressorMixin):
     """
     Mass Univariate Aggregation (MUA) estimator for connectivity-based predictive modeling.
 
@@ -436,31 +435,12 @@ class MUA(BaseEstimator, RegressorMixin):
         Whether to standardize the final aggregated scores (z-score normalization).
         - False: Keep raw scores
         - True: Standardize to mean=0, std=1
-
-    Attributes
-    ----------
-    correlations_ : array-like of shape (n_features,)
-        Correlation coefficients between each feature and the target
-    p_values_ : array-like of shape (n_features,)
-        P-values for each correlation
-    selected_edges_ : array-like of shape (n_features,)
-        Boolean mask indicating selected features
-    weights_ : array-like of shape (n_features,)
-        Weights assigned to each feature
-    n_selected_edges_ : int
-        Number of selected features
-    n_positive_ : int
-        Number of positive features (if split_by_sign=True)
-    n_negative_ : int
-        Number of negative features (if split_by_sign=True)
-    model_ : object
-        Fitted regression model (if use_final_regression=True)
     """
+
 
     def __init__(self, split_by_sign=False,
                  selection_method='pvalue', selection_threshold=0.05,
                  weighting_method='binary', correlation_type='pearson',
-                 use_final_regression=True, regression_type=None,
                  feature_aggregation='sum', standardize_scores=False):
 
         self.split_by_sign = split_by_sign
@@ -468,358 +448,174 @@ class MUA(BaseEstimator, RegressorMixin):
         self.selection_threshold = selection_threshold
         self.weighting_method = weighting_method
         self.correlation_type = correlation_type
-        self.use_final_regression = use_final_regression
-        self.regression_type = regression_type
         self.feature_aggregation = feature_aggregation
         self.standardize_scores = standardize_scores
 
-        # Set default regression type if needed
-        if self.use_final_regression and self.regression_type is None:
-            self.regression_type = 'linear regression'
-
     def fit(self, X, y):
-        """
-        Fit the connectivity model.
+        n_samples, n_edges = X.shape
 
-        Parameters
-        ----------
-        X : array-like of shape (n_samples, n_features)
-            Training data (vectorized connectivity features)
-        y : array-like of shape (n_samples,)
-            Target values
-
-        Returns
-        -------
-        self : object
-            Fitted estimator
-        """
-        n_samples, n_features = X.shape
-
-        # Step 1: Compute correlations
+        # Compute correlations
         self.correlations_, self.p_values_ = self._compute_correlations(X, y)
 
-        # Step 2: Select edges
-        self.selected_edges_ = self._select_edges(n_features)
+        # Select edges
+        self.selected_edges_ = self._select_edges(n_edges)
         self.n_selected_edges_ = np.sum(self.selected_edges_)
 
-        # Step 3: Calculate weights
-        self.weights_ = self._calculate_weights(X, y)
+        # Calculate edge weights
+        self.edge_weights_ = self._calculate_edge_weights(X, y)
 
-        # Step 4: Create features
-        features = self._create_features(X)
+        # Store network info if split by sign
+        if self.split_by_sign:
+            self.n_positive_ = np.sum((self.edge_weights_ > 0) & self.selected_edges_)
+            self.n_negative_ = np.sum((self.edge_weights_ < 0) & self.selected_edges_)
 
-        # Step 5: Fit regression OR store direct mapping
-        if self.use_final_regression:
-            self._fit_regression(features, y)
-        else:
-            # For direct prediction: features ARE the predictions
-            self.training_mean_ = np.mean(y)
-            self.training_std_ = np.std(y)
+        # Initialize score scaler if needed
+        if self.standardize_scores:
+            self.score_scaler_ = StandardScaler()
+            scores = self._create_scores(X)
+            self.score_scaler_.fit(scores)
 
         return self
 
+    def transform(self, X):
+        if not hasattr(self, 'edge_weights_'):
+            raise ValueError("Transformer not fitted yet. Call fit() first.")
+
+        scores = self._create_scores(X)
+
+        if self.standardize_scores:
+            scores = self.score_scaler_.transform(scores)
+
+        return scores
+
     def _compute_correlations(self, X, y):
-        """
-        Compute feature-behavior correlations.
+        n_samples, n_edges = X.shape
 
-        Parameters
-        ----------
-        X : array-like of shape (n_samples, n_features)
-            Feature matrix
-        y : array-like of shape (n_samples,)
-            Target values
-
-        Returns
-        -------
-        correlations : array-like of shape (n_features,)
-            Correlation coefficients
-        p_values : array-like of shape (n_features,)
-            P-values for each correlation
-        """
-        n_samples, n_features = X.shape
-
-        # Handle Spearman correlation by converting to ranks
         if self.correlation_type == 'spearman':
             y = rankdata(y)
             X = np.apply_along_axis(rankdata, axis=0, arr=X)
 
-        # Standardize y
         y_mean = np.mean(y)
         y_std = np.std(y, ddof=1)
         if y_std == 0:
-            return np.zeros(n_features), np.ones(n_features)
+            return np.zeros(n_edges), np.ones(n_edges)
         y_z = (y - y_mean) / y_std
 
-        # Standardize X columns
         X_mean = np.mean(X, axis=0)
         X_std = np.std(X, axis=0, ddof=1)
 
-        # Initialize arrays
-        correlations = np.zeros(n_features)
-        p_values = np.ones(n_features)
+        correlations = np.zeros(n_edges)
+        p_values = np.ones(n_edges)
 
-        # Find valid features (non-zero variance)
-        valid_features = X_std > 1e-10
+        valid_edges = X_std > 1e-10
 
-        if np.any(valid_features):
-            # Standardize valid features
+        if np.any(valid_edges):
             X_z = np.zeros_like(X)
-            X_z[:, valid_features] = (X[:, valid_features] - X_mean[valid_features]) / X_std[valid_features]
+            X_z[:, valid_edges] = (X[:, valid_edges] - X_mean[valid_edges]) / X_std[valid_edges]
 
-            # Compute correlations using matrix multiplication
-            correlations[valid_features] = np.dot(X_z[:, valid_features].T, y_z) / (n_samples - 1)
+            correlations[valid_edges] = np.dot(X_z[:, valid_edges].T, y_z) / (n_samples - 1)
 
-            # Compute p-values
-            t_stats = correlations[valid_features] * np.sqrt(
-                (n_samples - 2) / (1 - correlations[valid_features]**2 + 1e-10))
-            p_values[valid_features] = 2 * (1 - stats.t.cdf(np.abs(t_stats), n_samples - 2))
+            t_stats = correlations[valid_edges] * np.sqrt(
+                (n_samples - 2) / (1 - correlations[valid_edges] ** 2 + 1e-10))
+            p_values[valid_edges] = 2 * (1 - stats.t.cdf(np.abs(t_stats), n_samples - 2))
 
         return correlations, p_values
 
-    def _select_edges(self, n_features):
-        """
-        Select features based on selection method.
-
-        Parameters
-        ----------
-        n_features : int
-            Number of features
-
-        Returns
-        -------
-        selected_edges : array-like of shape (n_features,)
-            Boolean mask indicating selected edges
-        """
+    def _select_edges(self, n_edges):
         if self.selection_method == 'pvalue':
             selected_edges = self.p_values_ < self.selection_threshold
         elif self.selection_method == 'top_k':
-            k = int(min(self.selection_threshold, n_features))
+            k = int(min(self.selection_threshold, n_edges))
             top_k_indices = np.argpartition(np.abs(self.correlations_), -k)[-k:]
-            selected_edges = np.zeros(n_features, dtype=bool)
+            selected_edges = np.zeros(n_edges, dtype=bool)
             selected_edges[top_k_indices] = True
         else:  # 'all'
-            selected_edges = np.ones(n_features, dtype=bool)
+            selected_edges = np.ones(n_edges, dtype=bool)
 
         return selected_edges
 
-    def _calculate_weights(self, X, y):
-        """Calculate edge weights based on weighting method"""
-        n_features = X.shape[1]
-        n_samples = X.shape[0]
-        weights = np.zeros(n_features)
+    def _calculate_edge_weights(self, X, y):
+        n_edges = X.shape[1]
+        edge_weights = np.zeros(n_edges)
 
         if self.weighting_method == 'binary':
-            # Binary weights: +1/-1 based on correlation sign
-            weights[self.selected_edges_ & (self.correlations_ > 0)] = 1.0
-            weights[self.selected_edges_ & (self.correlations_ < 0)] = -1.0
+            edge_weights[self.selected_edges_ & (self.correlations_ > 0)] = 1.0
+            edge_weights[self.selected_edges_ & (self.correlations_ < 0)] = -1.0
 
         elif self.weighting_method == 'correlation':
-            # Use correlation coefficients as weights
-            weights[self.selected_edges_] = self.correlations_[self.selected_edges_]
+            edge_weights[self.selected_edges_] = self.correlations_[self.selected_edges_]
 
         elif self.weighting_method == 'squared_correlation':
-            # Squared correlations preserving sign
-            weights[self.selected_edges_] = (np.sign(self.correlations_[self.selected_edges_]) *
-                                            self.correlations_[self.selected_edges_] ** 2)
+            edge_weights[self.selected_edges_] = (
+                    np.sign(self.correlations_[self.selected_edges_]) *
+                    self.correlations_[self.selected_edges_] ** 2
+            )
 
         elif self.weighting_method == 'regression':
-            # Model: age = β * brain_feature (no intercept)
-
             selected_indices = np.where(self.selected_edges_)[0]
 
-            # Loop through each selected edge
             for idx in selected_indices:
-                # Extract single brain feature
-                brain_feature = X[:, idx]
+                brain_edge = X[:, idx]
+                XtX = np.dot(brain_edge, brain_edge)
+                Xty = np.dot(brain_edge, y)
 
-                # Fit model: y = β * brain_feature (no intercept)
-                # β = (X'X)^-1 X'y = X'y / X'X for univariate case
-                XtX = np.dot(brain_feature, brain_feature)
-                Xty = np.dot(brain_feature, y)
-
-                # Avoid division by zero
                 if XtX > 0:
                     beta = Xty / XtX
-                    weights[idx] = beta
+                    edge_weights[idx] = beta
                 else:
-                    weights[idx] = 0.0
+                    edge_weights[idx] = 0.0
 
-        return weights
+        return edge_weights
 
-    def _create_features(self, X):
-        """
-        Create features based on split_by_sign setting.
-
-        Parameters
-        ----------
-        X : array-like of shape (n_samples, n_features)
-            Feature matrix
-
-        Returns
-        -------
-        features : array-like
-            Aggregated features for regression or direct prediction
-        """
+    def _create_scores(self, X):
         if self.split_by_sign:
-            # separate positive and negative networks
-            features = self._create_split_features(X)
-            # Store network info
-            self.n_positive_ = np.sum((self.weights_ > 0) & self.selected_edges_)
-            self.n_negative_ = np.sum((self.weights_ < 0) & self.selected_edges_)
+            return self._create_split_scores(X)
         else:
-            # all features together
-            features = self._create_combined_features(X)
+            return self._create_combined_scores(X)
 
-        return features
-
-    def _create_split_features(self, X):
-        """
-        Create separate positive and negative network features (CPM-style).
-
-        This creates two features: one for positive network, one for negative.
-        """
+    def _create_split_scores(self, X):
         n_samples = X.shape[0]
 
-        # Separate positive and negative edges
-        pos_mask = (self.weights_ > 0) & self.selected_edges_
-        neg_mask = (self.weights_ < 0) & self.selected_edges_
+        pos_mask = (self.edge_weights_ > 0) & self.selected_edges_
+        neg_mask = (self.edge_weights_ < 0) & self.selected_edges_
 
-        features = np.zeros((n_samples, 2))
+        scores = np.zeros((n_samples, 2))
 
         # Positive network
         if np.any(pos_mask):
-            if self.weighting_method == 'binary':
-                if self.feature_aggregation == 'sum':
-                    features[:, 0] = np.sum(X[:, pos_mask], axis=1)
-                else:  # mean
-                    features[:, 0] = np.mean(X[:, pos_mask], axis=1)
-            else:
-                pos_weights = np.abs(self.weights_[pos_mask])
-                if self.feature_aggregation == 'sum':
-                    features[:, 0] = np.sum(X[:, pos_mask] * pos_weights, axis=1)
-                else:  # mean
-                    features[:, 0] = np.mean(X[:, pos_mask] * pos_weights, axis=1)
+            pos_weights = np.abs(self.edge_weights_[pos_mask])
+            if self.feature_aggregation == 'sum':
+                scores[:, 0] = np.sum(X[:, pos_mask] * pos_weights, axis=1)
+            else:  # mean
+                scores[:, 0] = np.mean(X[:, pos_mask] * pos_weights, axis=1)
 
         # Negative network
         if np.any(neg_mask):
-            if self.weighting_method == 'binary':
-                if self.feature_aggregation == 'sum':
-                    features[:, 1] = np.sum(X[:, neg_mask], axis=1)
-                else:  # mean
-                    features[:, 1] = np.mean(X[:, neg_mask], axis=1)
-            else:
-                neg_weights = np.abs(self.weights_[neg_mask])
-                if self.feature_aggregation == 'sum':
-                    features[:, 1] = np.sum(X[:, neg_mask] * neg_weights, axis=1)
-                else:  # mean
-                    features[:, 1] = np.mean(X[:, neg_mask] * neg_weights, axis=1)
+            neg_weights = np.abs(self.edge_weights_[neg_mask])
+            if self.feature_aggregation == 'sum':
+                scores[:, 1] = np.sum(X[:, neg_mask] * neg_weights, axis=1)
+            else:  # mean
+                scores[:, 1] = np.mean(X[:, neg_mask] * neg_weights, axis=1)
 
-        return features
+        return scores
 
-    def _create_combined_features(self, X):
-        """
-        Create combined features (combined score).
-
-        If use_final_regression=True: returns individual weighted features
-        If use_final_regression=False: returns single aggregated score
-        """
+    def _create_combined_scores(self, X):
         selected_indices = np.where(self.selected_edges_)[0]
         n_samples = X.shape[0]
-        n_selected = len(selected_indices)
 
-        if self.use_final_regression:
-            # Return individual weighted features for regression
-            features = np.zeros((n_samples, n_selected))
+        scores = np.zeros((n_samples, 1))
 
-            for i, edge_idx in enumerate(selected_indices):
-                features[:, i] = X[:, edge_idx] * self.weights_[edge_idx]
+        if len(selected_indices) > 0:
+            selected_weights = self.edge_weights_[selected_indices]
+            selected_edges = X[:, selected_indices]
+            weighted_edges = selected_edges * selected_weights
 
-        else:
-            # Return single aggregated score
-            features = np.zeros((n_samples, 1))
+            if self.feature_aggregation == 'sum':
+                scores[:, 0] = np.sum(weighted_edges, axis=1)
+            else:  # mean
+                scores[:, 0] = np.mean(weighted_edges, axis=1)
 
-            if len(selected_indices) > 0:
-                # Apply weights
-                selected_weights = self.weights_[selected_indices]
-                selected_features = X[:, selected_indices]
-                weighted_features = selected_features * selected_weights
-
-                # Aggregate
-                if self.feature_aggregation == 'sum':
-                    features[:, 0] = np.sum(weighted_features, axis=1)
-                else:  # mean
-                    features[:, 0] = np.mean(weighted_features, axis=1)
-
-            # Optionally standardize the score
-            if self.standardize_scores and not self.use_final_regression:
-                if not hasattr(self, 'score_scaler_'):
-                    self.score_scaler_ = StandardScaler()
-                    features = self.score_scaler_.fit_transform(features)
-                else:
-                    features = self.score_scaler_.transform(features)
-
-        return features
-
-    def _fit_regression(self, features, y):
-        """Fit the regression model."""
-        if self.regression_type == 'linear regression':
-            self.model_ = LinearRegression().fit(features, y)
-        elif self.regression_type == 'robust regression':
-            features_with_const = sm.add_constant(features)
-            self.model_ = sm.RLM(y, features_with_const, M=sm.robust.norms.HuberT()).fit()
-        elif self.regression_type == 'ridge regression':
-            self.model_ = Ridge(alpha=1.0).fit(features, y)
-        elif self.regression_type == 'lasso regression':
-            self.model_ = Lasso(alpha=0.1).fit(features, y)
-        else:
-            raise ValueError(f"Unknown regression type: {self.regression_type}")
-
-    def predict(self, X):
-        """Make predictions using the fitted model."""
-        if not hasattr(self, 'weights_'):
-            raise ValueError("Model not fitted yet.")
-
-        # Create features
-        features = self._create_features(X)
-
-        # Make predictions
-        if self.use_final_regression:
-            return self._predict_regression(features)
-        else:
-            # Direct prediction: features ARE the predictions
-            if self.split_by_sign:
-                # For split features, use difference as default
-                return features[:, 0] - features[:, 1]
-            else:
-                # For combined features, already processed
-                return features.flatten()
-
-    def _predict_regression(self, features):
-        """Make predictions with the regression model."""
-        if self.regression_type == 'robust regression':
-            features_with_const = sm.add_constant(features)
-            return self.model_.predict(features_with_const)
-        else:
-            return self.model_.predict(features)
-
-    def score(self, X, y):
-        """
-        Return the coefficient of determination R^2 of the prediction.
-
-        Parameters
-        ----------
-        X : array-like of shape (n_samples, n_features)
-            Test samples
-        y : array-like of shape (n_samples,)
-            True values for X
-
-        Returns
-        -------
-        score : float
-            R^2 of self.predict(X) wrt. y
-        """
-        y_pred = self.predict(X)
-        return r2_score(y, y_pred)
+        return scores
 
 # Plot the results
 def plot_results(predictions, actual, title=None):
@@ -923,6 +719,7 @@ def plot_results(predictions, actual, title=None):
     plt.show()
 
 if __name__ == "__main__":
+
     # Load data
     mat_file_path = "H:/untitled/s_hcp_fc_noble_corr.mat"
     connectome_data = HCP.reconstruct_fc_matrix(mat_file_path)
@@ -933,36 +730,78 @@ if __name__ == "__main__":
         connectome_data, behavioral_data
     )
 
+
+    print("\n1. CPM Pipeline")
+
     cpm_pipeline = Pipeline([
         ('vectorize', FeatureVectorizer()),
-        ('cpm', MUA(
+        ('mua', MUA(
             split_by_sign=True,
             selection_method='pvalue',
             selection_threshold=0.05,
             weighting_method='binary',
             feature_aggregation='sum',
-            use_final_regression=True,
-            regression_type='linear regression',
-            standardize_scores=False
-        ))
+        )),
+        ('regressor', LinearRegression())  # Linear regression
     ])
 
-    # cross-validation
+    # Cross-validation
     cpm_scores = cross_val_score(cpm_pipeline, connectome_clean, behavioral_clean, cv=10)
     cpm_predictions = cross_val_predict(cpm_pipeline, connectome_clean, behavioral_clean, cv=10)
+
     print(f"CPM R² (10-fold CV): {cpm_scores.mean():.3f} ± {cpm_scores.std():.3f}")
 
     # Evaluation
     cpm_r, cpm_p = pearsonr(behavioral_clean, cpm_predictions)
-    print(f"CPM (CV): r={cpm_r:.3f}, p={cpm_p:.2e}")
-
     mae = mean_absolute_error(behavioral_clean, cpm_predictions)
-    mse = mean_squared_error(behavioral_clean, cpm_predictions)
-    rmse = np.sqrt(mse)
+    rmse = np.sqrt(mean_squared_error(behavioral_clean, cpm_predictions))
     r2 = r2_score(behavioral_clean, cpm_predictions)
 
+    print(f"Correlation: r={cpm_r:.3f}, p={cpm_p:.2e}")
     print(f"R²: {r2:.3f}")
     print(f"MAE: {mae:.3f}")
     print(f"RMSE: {rmse:.3f}")
 
-    plot_results(cpm_predictions, behavioral_clean, title=None)
+
+    print("\n2. PNRS Pipeline")
+
+    pnrs_pipeline = Pipeline([
+        ('vectorize', FeatureVectorizer()),
+        ('mua', MUA(
+            split_by_sign=False,
+            selection_method='all',
+            weighting_method='regression',
+            feature_aggregation='sum',
+        ))
+    ])
+
+
+    pnrs_scores = pnrs_pipeline.fit_transform(connectome_clean, behavioral_clean)
+
+    # Use scores directly as predictions
+    pnrs_predictions = pnrs_scores.flatten()
+
+    # Evaluation
+    pnrs_r, pnrs_p = pearsonr(behavioral_clean, pnrs_predictions)
+    mae = mean_absolute_error(behavioral_clean, pnrs_predictions)
+    rmse = np.sqrt(mean_squared_error(behavioral_clean, pnrs_predictions))
+
+    r2 = r2_score(behavioral_clean, pnrs_predictions)
+
+    print(f"PNRS scores shape: {pnrs_scores.shape}")
+    print(f"Correlation: r={pnrs_r:.3f}, p={pnrs_p:.2e}")
+    print(f"R²: {r2:.3f}")
+    print(f"MAE: {mae:.3f}")
+    print(f"RMSE: {rmse:.3f}")
+
+
+    print("SUMMARY")
+
+    print("\nMethod\t\tCorrelation\tMAE")
+    print("-" * 40)
+    print(f"CPM\t\tr={cpm_r:.3f}\t\t{mean_absolute_error(behavioral_clean, cpm_predictions):.3f}")
+    print(f"PNRS\t\tr={pnrs_r:.3f}\t\t{mean_absolute_error(behavioral_clean, pnrs_predictions):.3f}")
+
+    # Plot results
+    plot_results(cpm_predictions, behavioral_clean, title="CPM")
+    plot_results(pnrs_predictions, behavioral_clean, title="PNRS")
