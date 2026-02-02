@@ -39,3 +39,16 @@ The MUA class employs seven configurable parameters organized across the three c
 | | `'mean'` | The mean of the weighted features |
 | **standardize_scores** | `True` | Z-score normalize final scores |
 | | `False` | Keep raw scores |
+
+### 2.3 Prediction Strategy
+Our configurable pipeline facilitates the use of the various regression options available in scikit-learn. The following section demonstrates the practical application of this approach. While LinearRegression() is used here as an example, the pipeline supports the integration of any alternative Scikit-learn regression method.
+
+```python
+The_pipeline = Pipeline([
+    ('vectorize', FeatureVectorizer()),
+    ('mua', MUA(
+        ...,
+        ...,
+    )),
+    ('regressor', LinearRegression())  # Linear regression
+])
