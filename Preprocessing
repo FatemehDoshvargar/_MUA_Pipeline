@@ -1,0 +1,157 @@
+# Preprocessing
+import numpy as np
+
+def remove_subjects_with_missing_data(connectivity_matrix, behavioral_data, missing_strategy='any', verbose=True):
+    """
+    Remove subjects with missing data from connectivity and behavioral data.
+
+    This function handles various input formats and automatically detects the
+    correct orientation of the data, converting to standard format
+    (subjects × features for 2D, subjects × regions × regions for 3D).
+
+    Parameters
+    ----------
+    connectivity_matrix : array-like
+        Either:
+        - 2D: subjects × features (true format) or features × subjects
+        - 3D: subjects × regions × regions (true format) or other orientations
+
+    behavioral_data : array-like
+        Either:
+        - 1D: Behavioral scores (subjects,)
+        - 2D: Behavioral scores (subjects, features) or (features, subjects)
+
+    missing_strategy : str, default='any'
+        Strategy for identifying missing data:
+        - 'zero': behavioral_data == 0
+        - 'nan': NaN values in behavioral_data
+        - 'inf': inf/-inf values in behavioral_data
+        - 'any': zero, NaN, or inf values in behavioral_data
+
+    verbose : bool, default=True
+        Whether to print information about removed subjects
+
+    Returns
+    -------
+    clean_connectivity : array-like
+        Connectivity data with missing subjects removed
+    clean_behavioral : array-like
+        Behavioral data with missing subjects removed
+    removed_indices : array-like
+        Indices of subjects that were removed
+    """
+
+    behavioral_data = np.array(behavioral_data)
+    connectivity_matrix = np.array(connectivity_matrix)
+    original_connectivity_shape = connectivity_matrix.shape
+    original_behavioral_shape = behavioral_data.shape
+
+    # Convert behavioral_data to standard format (subjects, features)
+    if behavioral_data.ndim == 1:
+        behavioral_true_format = behavioral_data.reshape(-1, 1)
+        n_subjects_behavioral = len(behavioral_data)
+    elif behavioral_data.ndim == 2:
+        if behavioral_data.shape[0] >= behavioral_data.shape[1]:
+            behavioral_true_format = behavioral_data
+            n_subjects_behavioral = behavioral_data.shape[0]
+        else:
+            behavioral_true_format = behavioral_data.T
+            n_subjects_behavioral = behavioral_data.shape[1]
+            if verbose:
+                print(f"Behavioral data transposed from {behavioral_data.shape} to {behavioral_true_format.shape}")
+    else:
+        raise ValueError(f"Behavioral data must be 1D or 2D, got {behavioral_data.ndim}D")
+
+    # Convert connectivity_matrix to standard format
+    if connectivity_matrix.ndim == 2:
+        # Auto-detect format based on behavioral data dimension
+        if connectivity_matrix.shape[0] == n_subjects_behavioral:
+            connectivity_true_format = connectivity_matrix
+            n_subjects_connectivity = connectivity_matrix.shape[0]
+        elif connectivity_matrix.shape[1] == n_subjects_behavioral:
+            connectivity_true_format = connectivity_matrix.T
+            n_subjects_connectivity = connectivity_matrix.shape[1]
+            if verbose:
+                print(f"Connectivity matrix transposed from {connectivity_matrix.shape} to {connectivity_true_format.shape}")
+        else:
+            if connectivity_matrix.shape[0] >= connectivity_matrix.shape[1]:
+                connectivity_true_format = connectivity_matrix
+                n_subjects_connectivity = connectivity_matrix.shape[0]
+            else:
+                connectivity_true_format = connectivity_matrix.T
+                n_subjects_connectivity = connectivity_matrix.shape[1]
+
+    elif connectivity_matrix.ndim == 3:
+        # Auto-detect 3D format and convert to (subjects, regions, regions)
+        shape = connectivity_matrix.shape
+
+        if shape[0] == n_subjects_behavioral:
+            connectivity_true_format = connectivity_matrix
+            n_subjects_connectivity = shape[0]
+        elif shape[1] == n_subjects_behavioral:
+            connectivity_true_format = np.transpose(connectivity_matrix, (1, 0, 2))
+            n_subjects_connectivity = shape[1]
+        elif shape[2] == n_subjects_behavioral:
+            connectivity_true_format = np.transpose(connectivity_matrix, (2, 0, 1))
+            n_subjects_connectivity = shape[2]
+        else:
+            # Fallback heuristics for ambiguous cases
+            if shape[1] == shape[2] and shape[0] != shape[1]:
+                connectivity_true_format = connectivity_matrix
+                n_subjects_connectivity = shape[0]
+            elif shape[0] == shape[2] and shape[0] != shape[1]:
+                connectivity_true_format = np.transpose(connectivity_matrix, (1, 0, 2))
+                n_subjects_connectivity = shape[1]
+            elif shape[0] == shape[1] and shape[0] != shape[2]:
+                connectivity_true_format = np.transpose(connectivity_matrix, (2, 0, 1))
+                n_subjects_connectivity = shape[2]
+            else:
+                connectivity_true_format = connectivity_matrix
+                n_subjects_connectivity = shape[0]
+
+    else:
+        raise ValueError(f"Connectivity matrix must be 2D or 3D, got {connectivity_matrix.ndim}D")
+
+    # Verify subject counts match
+    if n_subjects_connectivity != n_subjects_behavioral:
+        raise ValueError(f"Subject count mismatch: connectivity has {n_subjects_connectivity} subjects, "
+                        f"behavioral has {n_subjects_behavioral} subjects")
+
+    # Find subjects to remove based on strategy
+    if missing_strategy == 'zero':
+        missing_mask = behavioral_true_format == 0
+    elif missing_strategy == 'nan':
+        missing_mask = np.isnan(behavioral_true_format)
+    elif missing_strategy == 'inf':
+        missing_mask = np.isinf(behavioral_true_format)
+    elif missing_strategy == 'any':
+        missing_mask = (behavioral_true_format == 0) | np.isnan(behavioral_true_format) | np.isinf(behavioral_true_format)
+    else:
+        raise ValueError(f"Unknown missing_strategy: {missing_strategy}")
+
+    # Get indices of subjects to remove
+    subjects_with_missing = np.any(missing_mask, axis=1) if behavioral_true_format.ndim == 2 else missing_mask.flatten()
+    removed_indices = np.where(subjects_with_missing)[0]
+
+    if len(removed_indices) == 0:
+        if verbose:
+            print("No subjects with missing data found.")
+        return connectivity_true_format, behavioral_true_format.squeeze(), removed_indices
+
+    # Remove subjects from both datasets
+    clean_connectivity = np.delete(connectivity_true_format, removed_indices, axis=0)
+    clean_behavioral = np.delete(behavioral_true_format, removed_indices, axis=0)
+
+    # Squeeze behavioral data if it was originally 1D
+    if original_behavioral_shape == (n_subjects_behavioral,):
+        clean_behavioral = clean_behavioral.squeeze()
+
+    if verbose:
+        print(f"Missing data removal ({missing_strategy} strategy):")
+        print(f"  Original subjects: {n_subjects_behavioral}")
+        print(f"  Removed subjects: {len(removed_indices)}")
+        print(f"  Final subjects: {len(clean_behavioral) if clean_behavioral.ndim == 1 else clean_behavioral.shape[0]}")
+        print(f"  Connectivity shape: {original_connectivity_shape} → {clean_connectivity.shape}")
+        print(f"  Behavioral shape: {original_behavioral_shape} → {clean_behavioral.shape}")
+
+    return clean_connectivity, clean_behavioral, removed_indices
