@@ -175,8 +175,7 @@ def preprocess(connectivity_matrix, behavioral_data,
         print(f"  Original subjects: {n_subjects_behavioral}")
         print(f"  Removed subjects: {len(removed_indices)}")
         print("  Final subjects: ",
-              f"{len(clean_behavioral) if (
-                  clean_behavioral.ndim == 1) else clean_behavioral.shape[0]}")
+              f"{len(clean_behavioral) if (clean_behavioral.ndim == 1) else clean_behavioral.shape[0]}")
         print("  Connectivity shape: ",
               f"{original_connectivity_shape} → {clean_connectivity.shape}")
         print("  Behavioral shape: ",
