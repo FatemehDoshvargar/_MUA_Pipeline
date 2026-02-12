@@ -4,10 +4,10 @@ Visualization utilities for MUA Pipeline
 """
 
 import matplotlib.pyplot as plt
-import seaborn as sns
 import numpy as np
 from scipy import stats
 from scipy.stats import pearsonr
+
 
 # Plot the results
 def plot_results(predictions, actual, title=None):
@@ -100,8 +100,10 @@ def plot_results(predictions, actual, title=None):
         ax.tick_params(direction='out', length=4, width=0.8)
 
     # Add panel labels
-    ax1.text(-0.1, 1.05, 'A', transform=ax1.transAxes, fontsize=12, fontweight='bold')
-    ax2.text(-0.1, 1.05, 'B', transform=ax2.transAxes, fontsize=12, fontweight='bold')
+    ax1.text(-0.1, 1.05, 'A',
+             transform=ax1.transAxes, fontsize=12, fontweight='bold')
+    ax2.text(-0.1, 1.05, 'B',
+             transform=ax2.transAxes, fontsize=12, fontweight='bold')
 
     plt.tight_layout()
 

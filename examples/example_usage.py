@@ -3,23 +3,15 @@
 Example usage of the MUA Pipeline
 """
 
-
 import numpy as np
-import pandas as pd
-from scipy.stats import pearsonr, spearmanr, rankdata
-from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import KFold, cross_val_predict, cross_val_score
-from sklearn.linear_model import LinearRegression, Ridge, Lasso
+from scipy.stats import pearsonr
+from sklearn.model_selection import cross_val_predict, cross_val_score
+from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score, mean_squared_error
 from sklearn.pipeline import Pipeline
-import seaborn as sns
-from scipy import stats
-import warnings
-import time
 
 # Import the custom modules
-from mua_pipeline import FeatureVectorizer, MUA, preprocess, plot_results
+from mua_pipeline import FeatureVectorizer, MUA, plot_results
 
 if __name__ == "__main__":
 
@@ -41,10 +33,15 @@ if __name__ == "__main__":
     ])
 
     # Cross-validation
-    cpm_scores = cross_val_score(cpm_pipeline, functional_connectivity_matrices, behavioral_measures, cv=10)
-    cpm_predictions = cross_val_predict(cpm_pipeline, functional_connectivity_matrices, behavioral_measures, cv=10)
+    cpm_scores = cross_val_score(
+        cpm_pipeline, functional_connectivity_matrices,
+        behavioral_measures, cv=10)
+    cpm_predictions = cross_val_predict(
+        cpm_pipeline, functional_connectivity_matrices,
+        behavioral_measures, cv=10)
 
-    print(f"CPM R² (10-fold CV): {cpm_scores.mean():.3f} ± {cpm_scores.std():.3f}")
+    print("CPM R² (10-fold CV): ",
+          f"{cpm_scores.mean():.3f} ± {cpm_scores.std():.3f}")
 
     # Evaluation
     cpm_r, cpm_p = pearsonr(behavioral_measures, cpm_predictions)
@@ -56,8 +53,6 @@ if __name__ == "__main__":
     print(f"R²: {r2:.3f}")
     print(f"MAE: {mae:.3f}")
     print(f"RMSE: {rmse:.3f}")
-
-
     print("\n2. PNRS Pipeline")
 
     pnrs_pipeline = Pipeline([
@@ -70,8 +65,8 @@ if __name__ == "__main__":
         ))
     ])
 
-
-    pnrs_scores = pnrs_pipeline.fit_transform(functional_connectivity_matrices, behavioral_measures)
+    pnrs_scores = pnrs_pipeline.fit_transform(
+        functional_connectivity_matrices, behavioral_measures)
 
     # Use scores directly as predictions
     pnrs_predictions = pnrs_scores.flatten()
@@ -89,13 +84,14 @@ if __name__ == "__main__":
     print(f"MAE: {mae:.3f}")
     print(f"RMSE: {rmse:.3f}")
 
-
     print("SUMMARY")
 
     print("\nMethod\t\tCorrelation\tMAE")
     print("-" * 40)
-    print(f"CPM\t\tr={cpm_r:.3f}\t\t{mean_absolute_error(behavioral_measures, cpm_predictions):.3f}")
-    print(f"PNRS\t\tr={pnrs_r:.3f}\t\t{mean_absolute_error(behavioral_measures, pnrs_predictions):.3f}")
+    print(f"CPM\t\tr={cpm_r:.3f}\t\t{mean_absolute_error(
+        behavioral_measures, cpm_predictions):.3f}")
+    print(f"PNRS\t\tr={pnrs_r:.3f}\t\t{mean_absolute_error(
+        behavioral_measures, pnrs_predictions):.3f}")
 
     # Plot results
     plot_results(cpm_predictions, behavioral_measures, title="CPM")

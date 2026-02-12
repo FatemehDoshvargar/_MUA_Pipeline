@@ -4,11 +4,11 @@ Core classes for MUA Pipeline: FeatureVectorizer and MUA
 """
 
 import numpy as np
-import pandas as pd
-from scipy.stats import pearsonr, spearmanr, rankdata
+from scipy.stats import rankdata
 from scipy import stats  # ADD THIS - it was missing!
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.preprocessing import StandardScaler  # ADD THIS - it was missing!
+
 
 # feature vectorizer
 class FeatureVectorizer(BaseEstimator, TransformerMixin):
@@ -16,8 +16,10 @@ class FeatureVectorizer(BaseEstimator, TransformerMixin):
     Transform connectivity matrices to feature vectors.
 
     Can handle both:
-    - 3D input: (n_subjects, n_regions, n_regions) - extracts upper triangular elements
-    - 2D input: (n_subjects, n_features) - passes through unchanged
+    - 3D input: (n_subjects, n_regions, n_regions) -
+        extracts upper triangular elements
+    - 2D input: (n_subjects, n_features) - passes through
+        unchanged
 
     Parameters
     ----------
@@ -29,7 +31,8 @@ class FeatureVectorizer(BaseEstimator, TransformerMixin):
     input_type_ : str
         Either '2D' or '3D' based on input data
     n_regions_ : int
-        Number of regions in the connectivity matrix (only for 3D input)
+        Number of regions in the connectivity matrix
+            (only for 3D input)
     n_features_ : int
         Number of features
     upper_tri_indices_ : tuple
@@ -46,7 +49,8 @@ class FeatureVectorizer(BaseEstimator, TransformerMixin):
         Parameters
         ----------
         X : array-like
-            Either 2D (n_subjects, n_features) or 3D (n_subjects, n_regions, n_regions)
+            Either 2D (n_subjects, n_features) or 3D
+                (n_subjects, n_regions, n_regions)
         y : ignored
             Not used, present for sklearn compatibility
 
@@ -63,7 +67,7 @@ class FeatureVectorizer(BaseEstimator, TransformerMixin):
             self.n_features_ = X.shape[1]
 
             if self.verbose:
-                print(f"FeatureVectorizer fitted (2D passthrough mode):")
+                print("FeatureVectorizer fitted (2D passthrough mode):")
                 print(f"  Input shape: {X.shape}")
                 print(f"  Output shape: {X.shape}")
 
@@ -80,7 +84,7 @@ class FeatureVectorizer(BaseEstimator, TransformerMixin):
             self.n_features_ = len(self.upper_tri_indices_[0])
 
             if self.verbose:
-                print(f"FeatureVectorizer fitted (3D vectorization mode):")
+                print("FeatureVectorizer fitted (3D vectorization mode):")
                 print(f"  Input shape: {X.shape}")
                 print(f"  Output shape: ({n_subjects}, {self.n_features_})")
 
@@ -121,8 +125,10 @@ class FeatureVectorizer(BaseEstimator, TransformerMixin):
             n_subjects = X.shape[0]
 
             if X.shape[1] != self.n_regions_ or X.shape[2] != self.n_regions_:
-                raise ValueError(f"Expected matrices of shape ({self.n_regions_}, {self.n_regions_}), "
-                               f"got ({X.shape[1]}, {X.shape[2]})")
+                raise ValueError(
+                    "Expected matrices of shape ",
+                    "({self.n_regions_}, {self.n_regions_}), "
+                    f"got ({X.shape[1]}, {X.shape[2]})")
 
             # Extract upper triangular elements
             X_transformed = np.zeros((n_subjects, self.n_features_))
@@ -176,7 +182,8 @@ class FeatureVectorizer(BaseEstimator, TransformerMixin):
 class MUA(BaseEstimator, TransformerMixin):
 
     """
-    Mass Univariate Aggregation (MUA) estimator for connectivity-based predictive modeling.
+    Mass Univariate Aggregation (MUA) estimator for connectivity-based
+    predictive modeling.
 
     Parameters
     ----------
@@ -211,7 +218,8 @@ class MUA(BaseEstimator, TransformerMixin):
         Whether to fit a regression model on aggregated features
 
     regression_type : str, optional
-        Type of regression: 'linear regression', 'robust regression', 'ridge regression', 'lasso regression'
+        Type of regression: 'linear regression', 'robust regression',
+            'ridge regression', 'lasso regression'
 
     feature_aggregation : str, default='sum'
         How to aggregate features:
@@ -219,11 +227,11 @@ class MUA(BaseEstimator, TransformerMixin):
         - 'mean': Mean of features (normalized, scale-invariant)
 
     standardize_scores : bool, default=False
-        Whether to standardize the final aggregated scores (z-score normalization).
+        Whether to standardize the final aggregated scores
+            (z-score normalization).
         - False: Keep raw scores
         - True: Standardize to mean=0, std=1
     """
-
 
     def __init__(self, split_by_sign=False,
                  selection_method='pvalue', selection_threshold=0.05,
@@ -253,8 +261,10 @@ class MUA(BaseEstimator, TransformerMixin):
 
         # Store network info if split by sign
         if self.split_by_sign:
-            self.n_positive_ = np.sum((self.edge_weights_ > 0) & self.selected_edges_)
-            self.n_negative_ = np.sum((self.edge_weights_ < 0) & self.selected_edges_)
+            self.n_positive_ = np.sum((self.edge_weights_ > 0)
+                                      & self.selected_edges_)
+            self.n_negative_ = np.sum((self.edge_weights_ < 0)
+                                      & self.selected_edges_)
 
         # Initialize score scaler if needed
         if self.standardize_scores:
@@ -298,13 +308,18 @@ class MUA(BaseEstimator, TransformerMixin):
 
         if np.any(valid_edges):
             X_z = np.zeros_like(X)
-            X_z[:, valid_edges] = (X[:, valid_edges] - X_mean[valid_edges]) / X_std[valid_edges]
+            X_z[:, valid_edges] = (X[:, valid_edges] -
+                                   X_mean[valid_edges]) / X_std[valid_edges]
 
-            correlations[valid_edges] = np.dot(X_z[:, valid_edges].T, y_z) / (n_samples - 1)
+            correlations[valid_edges] = (
+                np.dot(X_z[:, valid_edges].T, y_z) / (n_samples - 1)
+            )
 
             t_stats = correlations[valid_edges] * np.sqrt(
                 (n_samples - 2) / (1 - correlations[valid_edges] ** 2 + 1e-10))
-            p_values[valid_edges] = 2 * (1 - stats.t.cdf(np.abs(t_stats), n_samples - 2))
+            p_values[valid_edges] = 2 * (
+                1 - stats.t.cdf(np.abs(t_stats), n_samples - 2)
+                )
 
         return correlations, p_values
 
@@ -313,7 +328,8 @@ class MUA(BaseEstimator, TransformerMixin):
             selected_edges = self.p_values_ < self.selection_threshold
         elif self.selection_method == 'top_k':
             k = int(min(self.selection_threshold, n_edges))
-            top_k_indices = np.argpartition(np.abs(self.correlations_), -k)[-k:]
+            top_k_indices = np.argpartition(
+                np.abs(self.correlations_), -k)[-k:]
             selected_edges = np.zeros(n_edges, dtype=bool)
             selected_edges[top_k_indices] = True
         else:  # 'all'
@@ -326,11 +342,15 @@ class MUA(BaseEstimator, TransformerMixin):
         edge_weights = np.zeros(n_edges)
 
         if self.weighting_method == 'binary':
-            edge_weights[self.selected_edges_ & (self.correlations_ > 0)] = 1.0
-            edge_weights[self.selected_edges_ & (self.correlations_ < 0)] = -1.0
+            edge_weights[self.selected_edges_
+                         & (self.correlations_ > 0)] = 1.0
+            edge_weights[self.selected_edges_
+                         & (self.correlations_ < 0)] = -1.0
 
         elif self.weighting_method == 'correlation':
-            edge_weights[self.selected_edges_] = self.correlations_[self.selected_edges_]
+            edge_weights[self.selected_edges_] = (
+                self.correlations_[self.selected_edges_]
+            )
 
         elif self.weighting_method == 'squared_correlation':
             edge_weights[self.selected_edges_] = (
@@ -403,4 +423,3 @@ class MUA(BaseEstimator, TransformerMixin):
                 scores[:, 0] = np.mean(weighted_edges, axis=1)
 
         return scores
-
