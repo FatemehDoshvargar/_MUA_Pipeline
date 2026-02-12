@@ -17,7 +17,6 @@ def plot_results(predictions, actual, title=None):
     if predictions is None:
         return
 
-    plt.rcParams['font.family'] = 'Arial'
     plt.rcParams['font.size'] = 10
     plt.rcParams['axes.linewidth'] = 0.8
     plt.rcParams['xtick.major.width'] = 0.8
