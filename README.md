@@ -9,7 +9,7 @@ We present a unified, flexible, and accessible configurable pipeline that can be
 ## 2. Installation
 
 ```bash
-pip install git+https://github.com/FatemehDoshvargar/_MUA_Pipeline.git
+pip install git+https://github.com/neuroprismlab/_MUA_Pipeline.git
 ```
 
 ## 3. Project Structure
