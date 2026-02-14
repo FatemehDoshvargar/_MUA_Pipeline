@@ -1,8 +1,7 @@
 # examples/example_usage.py
 """
-Example usage of the MUA Pipeline
+Example usage of the MUA Pipeline for CPM and PNRS
 """
-
 import numpy as np
 from scipy.stats import pearsonr
 from sklearn.model_selection import cross_val_predict, cross_val_score
@@ -13,6 +12,7 @@ from sklearn.pipeline import Pipeline
 # Import the custom modules
 from mua_pipeline import FeatureVectorizer, MUA, plot_results
 
+
 if __name__ == "__main__":
 
     # DATA LOADING SECTION
@@ -20,27 +20,34 @@ if __name__ == "__main__":
     functional_connectivity_matrices = 'your_connectivity_data'
     behavioral_measures = 'your_behavioral_data'
 
+    cv = 10
+
+    # CPM
+
+    print("Original CPM")
+
     cpm_pipeline = Pipeline([
         ('vectorize', FeatureVectorizer()),
         ('mua', MUA(
-            split_by_sign=True,
+            filter_by_sign=True,
+            direction='difference',
             selection_method='pvalue',
             selection_threshold=0.05,
             weighting_method='binary',
-            feature_aggregation='sum',
+            feature_aggregation='mean',
         )),
-        ('regressor', LinearRegression())  # Linear regression
+        ('regressor', LinearRegression())
     ])
 
     # Cross-validation
     cpm_scores = cross_val_score(
         cpm_pipeline, functional_connectivity_matrices,
-        behavioral_measures, cv=10)
+        behavioral_measures, cv=cv)
     cpm_predictions = cross_val_predict(
         cpm_pipeline, functional_connectivity_matrices,
-        behavioral_measures, cv=10)
+        behavioral_measures, cv=cv)
 
-    print("CPM R² (10-fold CV): ",
+    print(f"CPM R² ({cv}-fold CV): "
           f"{cpm_scores.mean():.3f} ± {cpm_scores.std():.3f}")
 
     # Evaluation
@@ -53,12 +60,15 @@ if __name__ == "__main__":
     print(f"R²: {r2:.3f}")
     print(f"MAE: {mae:.3f}")
     print(f"RMSE: {rmse:.3f}")
-    print("\n2. PNRS Pipeline")
+
+    # PNRS
+    
+    print("PNRS")
 
     pnrs_pipeline = Pipeline([
         ('vectorize', FeatureVectorizer()),
         ('mua', MUA(
-            split_by_sign=False,
+            filter_by_sign=False,
             selection_method='all',
             weighting_method='regression',
             feature_aggregation='sum',
@@ -73,23 +83,8 @@ if __name__ == "__main__":
 
     # Evaluation
     pnrs_r, pnrs_p = pearsonr(behavioral_measures, pnrs_predictions)
-    mae = mean_absolute_error(behavioral_measures, pnrs_predictions)
-    rmse = np.sqrt(mean_squared_error(behavioral_measures, pnrs_predictions))
 
-    r2 = r2_score(behavioral_measures, pnrs_predictions)
-
-    print(f"PNRS scores shape: {pnrs_scores.shape}")
     print(f"Correlation: r={pnrs_r:.3f}, p={pnrs_p:.2e}")
-    print(f"R²: {r2:.3f}")
-    print(f"MAE: {mae:.3f}")
-    print(f"RMSE: {rmse:.3f}")
-
-    print("SUMMARY")
-
-    print("\nMethod\t\tCorrelation\tMAE")
-    print("-" * 40)
-    print(f"CPM\t\tr={cpm_r:.3f}\t\t{mean_absolute_error(behavioral_measures, cpm_predictions):.3f}")
-    print(f"PNRS\t\tr={pnrs_r:.3f}\t\t{mean_absolute_error(behavioral_measures, pnrs_predictions):.3f}")
 
     # Plot results
     plot_results(cpm_predictions, behavioral_measures, title="CPM")
