@@ -109,10 +109,10 @@ class TestMUA:
 
         return X, y
 
-    def test_fit_split_by_sign(self, sample_data):
-        """Test MUA with split_by_sign=True"""
+    def test_fit_filter_by_sign(self, sample_data):
+        """Test MUA with filter_by_sign=True"""
         X, y = sample_data
-        mua = MUA(split_by_sign=True, selection_method='pvalue',
+        mua = MUA(filter_by_sign=True, selection_method='pvalue',
                   selection_threshold=0.05)
         mua.fit(X, y)
 
@@ -123,26 +123,42 @@ class TestMUA:
         assert hasattr(mua, 'n_negative_')
 
     def test_fit_combined(self, sample_data):
-        """Test MUA with split_by_sign=False"""
+        """Test MUA with filter_by_sign=False"""
         X, y = sample_data
-        mua = MUA(split_by_sign=False, selection_method='all')
+        mua = MUA(filter_by_sign=False, selection_method='all')
         mua.fit(X, y)
 
         assert hasattr(mua, 'edge_weights_')
         assert not hasattr(mua, 'n_positive_')
 
-    def test_transform_split_scores(self, sample_data):
-        """Test transform produces correct shape for split scores"""
+    def test_transform_difference_scores(self, sample_data):
+        """Test transform produces correct shape for difference scores"""
         X, y = sample_data
-        mua = MUA(split_by_sign=True)
+        mua = MUA(filter_by_sign=True, direction='difference')
         scores = mua.fit_transform(X, y)
 
-        assert scores.shape == (50, 2)  # 50 subjects, 2 scores (pos/neg)
+        assert scores.shape == (50, 1)  # 50 subjects, 1 score
+
+    def test_transform_positive_scores(self, sample_data):
+        """Test transform produces correct shape for positive scores"""
+        X, y = sample_data
+        mua = MUA(filter_by_sign=True, direction='positive')
+        scores = mua.fit_transform(X, y)
+
+        assert scores.shape == (50, 1)  # 50 subjects, 1 score
+
+    def test_transform_negative_scores(self, sample_data):
+        """Test transform produces correct shape for negative scores"""
+        X, y = sample_data
+        mua = MUA(filter_by_sign=True, direction='negative')
+        scores = mua.fit_transform(X, y)
+
+        assert scores.shape == (50, 1)  # 50 subjects, 1 score
 
     def test_transform_combined_scores(self, sample_data):
         """Test transform produces correct shape for combined scores"""
         X, y = sample_data
-        mua = MUA(split_by_sign=False)
+        mua = MUA(filter_by_sign=False)
         scores = mua.fit_transform(X, y)
 
         assert scores.shape == (50, 1)  # 50 subjects, 1 score
@@ -190,7 +206,7 @@ class TestMUA:
         X, y = sample_data
 
         pipeline = Pipeline([
-            ('mua', MUA(split_by_sign=True, selection_method='pvalue')),
+            ('mua', MUA(filter_by_sign=True, selection_method='pvalue')),
             ('regressor', LinearRegression())
         ])
 
@@ -227,7 +243,7 @@ class TestIntegration:
         # Build pipeline
         pipeline = Pipeline([
             ('vectorize', FeatureVectorizer()),
-            ('mua', MUA(split_by_sign=True, selection_method='pvalue')),
+            ('mua', MUA(filter_by_sign=True, selection_method='pvalue')),
             ('regressor', LinearRegression())
         ])
 
@@ -252,7 +268,7 @@ class TestIntegration:
 
         pipeline = Pipeline([
             ('vectorize', FeatureVectorizer()),
-            ('mua', MUA(split_by_sign=False, selection_method='all',
+            ('mua', MUA(filter_by_sign=False, selection_method='all',
                         weighting_method='regression'))
         ])
 
